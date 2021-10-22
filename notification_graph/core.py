@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, Any, Dict, Generator, Set, Optional, Union
+from typing import Callable, Any, Dict, Generator, Set, Optional, Union, Iterable
 from .notification_behaviors import INotificationBehaviorInterface
 
 
@@ -28,33 +28,45 @@ class NotificationType(object):
 
 class NotificationAttributeSet(object):
     def __init__(self, attributes: Dict[str, Any]):
-        self.attribute_dict = attributes
+        self.__attribute_dict = attributes
         '''Attributes owned by this item, should only be set by behaviors on same item.'''
 
-        self.inherited_attribute_dict: Dict[str, Any] = {}
+        self.__inherited_attribute_dict: Dict[str, Any] = {}
         '''Attributes inherited from other items, can be set by any behaviors.'''
+
+    def get_attribute(self, attribute: str, default=None):
+        return self.__attribute_dict.get(attribute, default)
+
+    def set_attribute(self, attribute: str, value):
+        self.__attribute_dict[attribute] = value
+
+    def get_cache(self, attribute: str, default=None):
+        return self.__inherited_attribute_dict.get(attribute, default)
+
+    def set_cache(self, attribute: str, value):
+        self.__inherited_attribute_dict[attribute] = value
 
 
 class NotificationAttributeSetHandle(object):
 
     def __init__(self, attribute_set: NotificationAttributeSet, behavior: INotificationBehaviorInterface,
                  notification_item: NotificationItem, type_identifier):
-        self._attribute_set = attribute_set
-        self._behavior = behavior
-        self._item = notification_item
-        self._identifier = type_identifier
+        self.__attribute_set = attribute_set
+        self.__behavior = behavior
+        self.__item = notification_item
+        self.__identifier = type_identifier
 
     @property
     def attribute_set(self):
-        return self._attribute_set
+        return self.__attribute_set
 
     @property
     def item(self):
-        return self._item
+        return self.__item
 
     @property
     def identifier(self):
-        return self._identifier
+        return self.__identifier
 
     def get_attribute(self, attribute_name: str):
         """Get value of an attribute
@@ -64,7 +76,7 @@ class NotificationAttributeSetHandle(object):
         :raise AttributeError:
         """
         try:
-            return self._behavior.get_attribute(self, attribute_name)
+            return self.__behavior.get_attribute(self, attribute_name)
         except NameError:
             raise AttributeError(f'can\'t access attribute {repr(attribute_name)}')
 
@@ -76,7 +88,7 @@ class NotificationAttributeSetHandle(object):
         :raise AttributeError:
         """
         try:
-            self._behavior.set_attribute(self, attribute_name, value)
+            self.__behavior.set_attribute(self, attribute_name, value)
         except NameError:
             raise AttributeError(f'can\'t set attribute {repr(attribute_name)}')
 
@@ -201,6 +213,7 @@ class NotificationItem(object):
     def _set_graph(self, graph: NotificationGraph):
         self.__graph = graph
 
+
     @staticmethod
     def __get_identifier(notification_type):
         return notification_type.identifier if isinstance(notification_type, NotificationType) else notification_type
@@ -223,6 +236,24 @@ class NotificationGraph(object):
 
     def __init__(self):
         self.__items: Set[NotificationItem] = set()
+        self.__behaviors: Set[INotificationBehaviorInterface] = set()
+
+    def register_behaviors(self, behaviors: Iterable[INotificationBehaviorInterface]):
+        self.__behaviors |= behaviors
+
+    def notify_subscription_change(self, observer: NotificationItem, subscribed: NotificationItem, establish: bool):
+        """
+
+        :param observer:
+        :param subscribed:
+        :param establish: True if after new subscription established, False if before old subscription destroy
+        """
+        if establish:
+            for behavior in self.__behaviors:
+                behavior.post_subscribe(observer, subscribed)
+        else:
+            for behavior in self.__behaviors:
+                behavior.pre_unsubscribe(observer, subscribed)
 
     @staticmethod
     def create(*args: Union[NotificationItem, NotificationGraph]):
@@ -258,6 +289,6 @@ class NotificationGraph(object):
         elif item2.graph is None:
             item1.graph.__add_item(item2)
         elif item1.graph is item2.graph:
-            return
+            pass
         else:
             NotificationGraph.create(graph1, graph2)

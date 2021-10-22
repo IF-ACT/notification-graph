@@ -30,6 +30,25 @@ class INotificationBehaviorInterface:
         :raise NameError: this behavior does not handle given attribute
         """
 
+    def post_subscribe(self, observer_item, subscribed_item):
+        """Called after a new subscription established in the graph.
+
+        :param observer_item:
+        :type observer_item: NotificationItem
+        :param subscribed_item:
+        :type subscribed_item: NotificationItem
+        """
+
+    def pre_unsubscribe(self, observer_item, unsubscribed_item):
+        """Called before observer item unsubscribes an item.
+
+        :param observer_item:
+        :type observer_item: NotificationItem
+        :param unsubscribed_item:
+        :type unsubscribed_item: NotificationItem
+        :return:
+        """
+
 
 class NotifyObservers(INotificationBehaviorInterface):
     """Notify observer items with a given attribute.
@@ -46,8 +65,8 @@ class NotifyObservers(INotificationBehaviorInterface):
     def get_attribute(self, handle, attribute_name: str):
         if attribute_name == self.__attribute_name:
             attribute_set = handle.attribute_set
-            return attribute_set.attribute_dict.get(self.__attribute_name, False) or \
-                attribute_set.inherited_attribute_dict.get(self.__attribute_name, False)
+            return attribute_set.get_attribute(self.__attribute_name, False) or \
+                attribute_set.get_cache(self.__attribute_name, False)
         else:
             raise NameError()
 
@@ -60,14 +79,14 @@ class NotifyObservers(INotificationBehaviorInterface):
 
     def __recursive_set_attribute(self, attribute_set, item, attribute_value, identifier):
         # update self
-        old_value = attribute_set.attribute_dict.get(self.__attribute_name, None)
+        old_value = attribute_set.get_attribute(self.__attribute_name, None)
         if old_value == attribute_value:
             return  # value not changed, no need to do anything
 
-        attribute_set.attribute_dict[self.__attribute_name] = attribute_value
+        attribute_set.set_attribute(self.__attribute_name, attribute_value)
 
         # update observers
-        inherited_value = attribute_set.inherited_attribute_dict.get(self.__attribute_name, False)
+        inherited_value = attribute_set.get_cache(self.__attribute_name, False)
         old_gathered_value = old_value or inherited_value
         if old_gathered_value == attribute_value:
             return  # result not changed, no need to notify observer
