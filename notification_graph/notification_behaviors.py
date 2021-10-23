@@ -30,28 +30,27 @@ class INotificationBehaviorInterface:
         :raise NameError: this behavior does not handle given attribute
         """
 
-    def post_subscribe(self, observer_item, subscribed_item):
+    def post_subscribe(self, subscriber_item, notifier_item):
         """Called after a new subscription established in the graph.
 
-        :param observer_item:
-        :type observer_item: NotificationItem
-        :param subscribed_item:
-        :type subscribed_item: NotificationItem
+        :param subscriber_item:
+        :type subscriber_item: NotificationItem
+        :param notifier_item:
+        :type notifier_item: NotificationItem
         """
 
-    def pre_unsubscribe(self, observer_item, unsubscribed_item):
-        """Called before observer item unsubscribes an item.
+    def pre_unsubscribe(self, subscriber_item, notifier_item):
+        """Called before subscriber item unsubscribes an item.
 
-        :param observer_item:
-        :type observer_item: NotificationItem
-        :param unsubscribed_item:
-        :type unsubscribed_item: NotificationItem
-        :return:
+        :param subscriber_item:
+        :type subscriber_item: NotificationItem
+        :param notifier_item:
+        :type notifier_item: NotificationItem
         """
 
 
-class NotifyObservers(INotificationBehaviorInterface):
-    """Notify observer items with a given attribute.
+class NotifySubscribers(INotificationBehaviorInterface):
+    """Notify subscriber items with a given attribute.
 
     When an item set the attribute to True, all item subscribing it will also set the attribute to true.
     """
@@ -64,33 +63,59 @@ class NotifyObservers(INotificationBehaviorInterface):
 
     def get_attribute(self, handle, attribute_name: str):
         if attribute_name == self.__attribute_name:
-            attribute_set = handle.attribute_set
-            return attribute_set.get_attribute(self.__attribute_name, False) or \
-                attribute_set.get_cache(self.__attribute_name, False)
+            return self.__get_gathered_value(handle.attribute_set)
         else:
             raise NameError()
 
     def set_attribute(self, handle, attribute_name: str, attribute_value: bool):
         if attribute_name == self.__attribute_name:
             check_type(attribute_value, bool)
-            self.__recursive_set_attribute(handle.attribute_set, handle.item, attribute_value, handle.identifier)
+            old_gathered_value = self.__get_gathered_value(handle.attribute_set)
+            handle.attribute_set.set_attribute(self.__attribute_name, attribute_value)
+            if self.__get_gathered_value(handle.attribute_set) == old_gathered_value:
+                return
+            if attribute_value:
+                for item in handle.item.subscriber_items:
+                    self.__recursive_set_true(item, handle.identifier)
+            else:
+                for item in handle.item.subscriber_items:
+                    self.__recursive_set_false(item, handle.identifier)
         else:
             raise NameError()
 
-    def __recursive_set_attribute(self, attribute_set, item, attribute_value, identifier):
-        # update self
-        old_value = attribute_set.get_attribute(self.__attribute_name, None)
-        if old_value == attribute_value:
-            return  # value not changed, no need to do anything
+    def post_subscribe(self, subscriber_item, notifier_item):
+        for identifier in subscriber_item.graph.get_related_identifiers(self):
+            attribute_set = notifier_item.get_attribute_set(identifier)
+            if attribute_set is None:
+                continue
+            if self.__get_gathered_value(attribute_set):
+                self.__recursive_set_true(subscriber_item, identifier)
 
-        attribute_set.set_attribute(self.__attribute_name, attribute_value)
+    def pre_unsubscribe(self, subscriber_item, notifier_item):
+        pass
 
-        # update observers
-        inherited_value = attribute_set.get_cache(self.__attribute_name, False)
-        old_gathered_value = old_value or inherited_value
-        if old_gathered_value == attribute_value:
-            return  # result not changed, no need to notify observer
+    def __get_gathered_value(self, attribute_set):
+        return attribute_set.get_attribute(self.__attribute_name, False) or \
+                attribute_set.get_cache(self.__attribute_name, False)
 
-        for i in item.observer_items:
-            self.__recursive_set_attribute(i.get_attribute_set(identifier, True), i, attribute_value or inherited_value,
-                                           identifier)
+    def __recursive_set_true(self, item, identifier):
+        """:type item: NotificationItem"""
+        attribute_set = item.get_attribute_set(identifier, True)
+        if attribute_set.get_cache(self.__attribute_name, False):
+            return
+        attribute_set.set_cache(self.__attribute_name, True)
+        for i in item.subscriber_items:
+            self.__recursive_set_true(i, identifier)
+
+    def __recursive_set_false(self, item, identifier):
+        """:type item: NotificationItem"""
+        attribute_set = item.get_attribute_set(identifier)
+        if attribute_set is None or not attribute_set.get_cache(self.__attribute_name, False):
+            return
+        for notifier in item.notifier_items:
+            notifier_attribute_set = notifier.get_attribute_set(identifier)
+            if notifier_attribute_set is not None and self.__get_gathered_value(notifier_attribute_set):
+                return
+        attribute_set.set_cache(self.__attribute_name, False)
+        for i in item.subscriber_items:
+            self.__recursive_set_false(i, identifier)

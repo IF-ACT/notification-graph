@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, Any, Dict, Generator, Set, Optional, Union, Iterable
+from typing import Callable, Any, Dict, Generator, Set, Optional, Union
 from .notification_behaviors import INotificationBehaviorInterface
 
 
@@ -99,25 +99,36 @@ class NotificationItem(object):
         self.__graph: Optional[NotificationGraph] = None
         self.__notification_behaviors: Dict[Any, INotificationBehaviorInterface] = {}
         self.__notification_attributes: Dict[Any, NotificationAttributeSet] = {}
-        self.__subscribe_set: Set[NotificationItem] = set()
-        self.__observer_set: Set[NotificationItem] = set()
+        self.__notifier_set: Set[NotificationItem] = set()
+        self.__subscriber_set: Set[NotificationItem] = set()
 
     @property
     def graph(self):
+        """This value may be destroyed, do not keep instance of it, use it as temporary value instead"""
         return self.__graph
 
     @property
-    def subscribed_items(self):
-        for item in self.__subscribe_set:
-            yield item
+    def notifier_items(self):
+        """Do not modify this property
+
+        :return: items subscribed by self
+        """
+        return self.__notifier_set
 
     @property
-    def observer_items(self):
-        for item in self.__observer_set:
-            yield item
+    def subscriber_items(self):
+        """Do not modify this property
+
+        :return: items subscribing self
+        """
+        return self.__subscriber_set
+
+    @property
+    def _notification_behaviors(self):
+        return self.__notification_behaviors
 
     def subscribe(self, item: NotificationItem, check_circular_subscription=True):
-        """Subscribe another notification item, typically when the subscribed item does some change,
+        """Subscribe another notification item, typically when the notifier item does some change,
         self will receive a signore.
 
         :param item: another notification item in same graph
@@ -125,30 +136,31 @@ class NotificationItem(object):
         are in confidence the operation won't cause circular subscription.
         """
         assert self is not item, 'can\'t subscribe self'
-        self.__subscribe_set.add(item)
-        item.__observer_set.add(self)
+        item.__subscriber_set.add(self)
+        self.__notifier_set.add(item)
 
         if check_circular_subscription:
             try:
                 self.walk_through()
             except AssertionError as e:
-                self.__subscribe_set.remove(item)
-                item.__observer_set.remove(self)
+                self.__notifier_set.remove(item)
+                item.__subscriber_set.remove(self)
                 raise e
 
         NotificationGraph.on_connect(self, item)
+        self.graph.notify_post_subscribe(self, item)
 
     def unsubscribe(self, item: NotificationItem):
         """TODO: Not safe yet, may cause graph split into two pieces
 
         :param item: another notification item in same graph
-        :raise KeyError: not subscribed that item yet
+        :raise KeyError: not notifier that item yet
         """
-        try:
-            self.__subscribe_set.remove(item)
-        except KeyError:
-            raise KeyError(f'{repr(self)} has not subscribed {repr(item)}')
-        item.__observer_set.remove(self)
+        if item not in self.__notifier_set:
+            raise KeyError(f'{repr(self)} has not notifier {repr(item)}')
+        self.graph.notify_pre_unsubscribe(self, item)
+        self.__notifier_set.remove(item)
+        item.__subscriber_set.remove(self)
 
     def add_notification(self, notification_type: NotificationType, **attributes):
         """Add a new notification type to this item.
@@ -163,7 +175,7 @@ class NotificationItem(object):
         self.__notification_attributes[notification_type.identifier] = NotificationAttributeSet(attributes)
 
     def has_subscription(self, item: NotificationItem, find_indirect=False):
-        """Returns True if self subscribed that item.
+        """Returns True if self notifier that item.
 
         :param item: item to search
         :param find_indirect: True to find recursively, False to find only direct subscriptions
@@ -171,10 +183,10 @@ class NotificationItem(object):
         if item is self:
             return False
 
-        if item in self.__subscribe_set:
+        if item in self.__notifier_set:
             return True
-        elif find_indirect and self.__subscribe_set:
-            return any(subscribed_item.has_subscription(item, True) for subscribed_item in self.__subscribe_set)
+        elif find_indirect and self.__notifier_set:
+            return any(notifier_item.has_subscription(item, True) for notifier_item in self.__notifier_set)
         else:
             return False
 
@@ -182,11 +194,11 @@ class NotificationItem(object):
                      terminate=True) -> Generator[NotificationItem]:
         """Walks through items recursively
 
-        :param upstream: True to walk through upstream observer items, False to walk through downstream subscribed items
+        :param upstream: True to walk through upstream subscriber items, False to walk through downstream notifier items
         :param assertion: stops when assertion returns false
         :param terminate: True to return when stopped, False to skip subtree items when stopped and continue
         """
-        for item in self.__observer_set if upstream else self.__subscribe_set:
+        for item in self.__subscriber_set if upstream else self.__notifier_set:
             if not assertion(item):
                 if terminate:
                     break
@@ -196,6 +208,14 @@ class NotificationItem(object):
             for recursive_item in item.walk_through(upstream, assertion, terminate):
                 assert recursive_item is not self, 'circular subscription detected'
                 yield recursive_item
+
+    def get_attribute(self, notification_type, attribute: str):
+        """:raise KeyError, NameError:"""
+        return self[notification_type].get_attribute(attribute)
+
+    def set_attribute(self, notification_type, attribute: str, value):
+        """:raise KeyError, NameError:"""
+        self[notification_type].set_attribute(attribute, value)
 
     def get_attribute_set(self, notification_type, create_if_not_exist=False):
         """Raw access to attribute sets
@@ -212,7 +232,6 @@ class NotificationItem(object):
 
     def _set_graph(self, graph: NotificationGraph):
         self.__graph = graph
-
 
     @staticmethod
     def __get_identifier(notification_type):
@@ -232,28 +251,28 @@ class NotificationItem(object):
 # noinspection PyProtectedMember
 class NotificationGraph(object):
     """Graphs can have very short lifetime, never keep instance of this class.
-    Use all instances as temporary variables."""
+    Use all instances as temporary variables.
+
+    The graph is supposed to be a directed acyclic graph.
+    """
 
     def __init__(self):
         self.__items: Set[NotificationItem] = set()
-        self.__behaviors: Set[INotificationBehaviorInterface] = set()
+        self.__behaviors: Dict[INotificationBehaviorInterface, set] = {}
+        '''key: behavior,
+        value: set of related identifiers'''
+        self._destroyed = False
 
-    def register_behaviors(self, behaviors: Iterable[INotificationBehaviorInterface]):
-        self.__behaviors |= behaviors
+    def notify_post_subscribe(self, subscriber: NotificationItem, notifier: NotificationItem):
+        for behavior in self.__behaviors.keys():
+            behavior.post_subscribe(subscriber, notifier)
 
-    def notify_subscription_change(self, observer: NotificationItem, subscribed: NotificationItem, establish: bool):
-        """
+    def notify_pre_unsubscribe(self, subscriber: NotificationItem, notifier: NotificationItem):
+        for behavior in self.__behaviors.keys():
+            behavior.pre_unsubscribe(subscriber, notifier)
 
-        :param observer:
-        :param subscribed:
-        :param establish: True if after new subscription established, False if before old subscription destroy
-        """
-        if establish:
-            for behavior in self.__behaviors:
-                behavior.post_subscribe(observer, subscribed)
-        else:
-            for behavior in self.__behaviors:
-                behavior.pre_unsubscribe(observer, subscribed)
+    def get_related_identifiers(self, behavior):
+        return self.__behaviors.get(behavior, set())
 
     @staticmethod
     def create(*args: Union[NotificationItem, NotificationGraph]):
@@ -262,33 +281,59 @@ class NotificationGraph(object):
         for arg in args:
             if isinstance(arg, NotificationItem):
                 assert arg.graph is None, f'can\'t create with item {repr(arg)}, it is already in graph {arg.graph}'
-                graph.__add_item(arg)
+                graph.__add_item(arg, True)
+
             elif isinstance(arg, NotificationGraph):
                 for item in arg.__items:
                     graph.__add_item(item)
+
+                # merge behavior dicts
+                for behavior, id_set in arg.__behaviors.items():
+                    merged_id_set = graph.__behaviors.get(behavior, None)
+                    if merged_id_set is None:
+                        graph.__behaviors[behavior] = id_set
+                    else:
+                        merged_id_set |= id_set
+
                 arg.__destroy()
+
             else:
                 raise TypeError(f'unknown argument type {repr(arg.__class__)} at index {args.index(arg)}')
         return graph
 
     def __destroy(self):
-        self.__items = None
+        del self.__items
+        del self.__behaviors
+        self._destroyed = True
 
-    def __add_item(self, item: NotificationItem):
+    def __add_item(self, item: NotificationItem, register_behaviors=False):
         self.__items.add(item)
         item._set_graph(self)
 
+        if register_behaviors:
+            for identifier, behavior in item._notification_behaviors.items():
+                id_set = self.__behaviors.get(behavior, None)
+                if id_set is None:
+                    id_set = set()
+                    self.__behaviors[behavior] = id_set
+                id_set.add(identifier)
+
     @staticmethod
-    def on_connect(item1: NotificationItem, item2: NotificationItem):
-        graph1 = item1.graph
-        graph2 = item2.graph
+    def on_connect(subscriber: NotificationItem, notifier: NotificationItem):
+        graph1 = subscriber.graph
+        graph2 = notifier.graph
         if graph1 is None and graph2 is None:
-            NotificationGraph.create(item1, item2)
-        elif item1.graph is None:
-            item2.graph.__add_item(item1)
-        elif item2.graph is None:
-            item1.graph.__add_item(item2)
-        elif item1.graph is item2.graph:
+            NotificationGraph.create(subscriber, notifier)
+        elif subscriber.graph is None:
+            notifier.graph.__add_item(subscriber, True)
+        elif notifier.graph is None:
+            subscriber.graph.__add_item(notifier, True)
+        elif subscriber.graph is notifier.graph:
             pass
         else:
             NotificationGraph.create(graph1, graph2)
+
+    def __getattribute__(self, item):
+        if super(NotificationGraph, self).__getattribute__('_destroyed'):
+            raise ValueError('this graph is already destroyed')
+        return super(NotificationGraph, self).__getattribute__(item)
