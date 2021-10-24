@@ -1,6 +1,7 @@
 from __future__ import annotations
-from typing import Callable, Any, Dict, Generator, Set, Optional, Union
+from typing import Callable, Any, Dict, Generator, Set, Optional, Union, Tuple
 from .notification_behaviors import INotificationBehaviorInterface
+from .util import merge_dict_set_values
 
 
 class NotificationType(object):
@@ -23,7 +24,7 @@ class NotificationType(object):
         return self.__default_attributes
 
     def __repr__(self):
-        return f'<notification type {repr(self.__identifier)}>'
+        return f'<notification type {repr(self.__identifier)} with behavior {self.__behavior}>'
 
 
 class NotificationAttributeSet(object):
@@ -87,6 +88,9 @@ class NotificationAttributeSetHandle(object):
         :param value: value of the attribute
         :raise AttributeError:
         """
+        graph = self.__item.graph
+        if graph is not None:
+            graph.notify_pre_set_attribute(self, attribute_name, value)
         try:
             self.__behavior.set_attribute(self, attribute_name, value)
         except NameError:
@@ -133,7 +137,7 @@ class NotificationItem(object):
 
         :param item: another notification item in same graph
         :param check_circular_subscription: perform circular subscription check, set it to False if you
-        are in confidence the operation won't cause circular subscription.
+            are in confidence the operation won't cause circular subscription.
         """
         assert self is not item, 'can\'t subscribe self'
         item.__subscriber_set.add(self)
@@ -141,7 +145,8 @@ class NotificationItem(object):
 
         if check_circular_subscription:
             try:
-                self.walk_through()
+                for _ in self.walk_through():
+                    pass
             except AssertionError as e:
                 self.__notifier_set.remove(item)
                 item.__subscriber_set.remove(self)
@@ -259,20 +264,35 @@ class NotificationGraph(object):
     def __init__(self):
         self.__items: Set[NotificationItem] = set()
         self.__behaviors: Dict[INotificationBehaviorInterface, set] = {}
-        '''key: behavior,
+        '''Behaviors with their related identifiers in this graph.
+        
+        key: behavior,
         value: set of related identifiers'''
+
+        self.__interest_attributes: Dict[Tuple[Any, str], Set[INotificationBehaviorInterface]] = {}
+        '''When a behavior 'show interest' to an attribute, we register it here, and before every
+        set attribute operation, we invoke set_attribute() on that behavior.
+        
+        key: (identifier, attribute name),
+        value: set of behaviors'''
+
         self._destroyed = False
 
+    def notify_pre_set_attribute(self, handle: NotificationAttributeSetHandle, attribute_name: str, attribute_value):
+        behavior_set = self.__interest_attributes.get((handle.identifier, attribute_name), None)
+        if behavior_set is None:
+            return
+
+        for behavior in behavior_set:
+            behavior.set_attribute(handle, attribute_name, attribute_value)
+
     def notify_post_subscribe(self, subscriber: NotificationItem, notifier: NotificationItem):
-        for behavior in self.__behaviors.keys():
-            behavior.post_subscribe(subscriber, notifier)
+        for behavior, related_identifiers in self.__behaviors.items():
+            behavior.post_subscribe(subscriber, notifier, related_identifiers)
 
     def notify_pre_unsubscribe(self, subscriber: NotificationItem, notifier: NotificationItem):
-        for behavior in self.__behaviors.keys():
-            behavior.pre_unsubscribe(subscriber, notifier)
-
-    def get_related_identifiers(self, behavior):
-        return self.__behaviors.get(behavior, set())
+        for behavior, related_identifiers in self.__behaviors.items():
+            behavior.pre_unsubscribe(subscriber, notifier, related_identifiers)
 
     @staticmethod
     def create(*args: Union[NotificationItem, NotificationGraph]):
@@ -280,21 +300,16 @@ class NotificationGraph(object):
         graph = NotificationGraph()
         for arg in args:
             if isinstance(arg, NotificationItem):
-                assert arg.graph is None, f'can\'t create with item {repr(arg)}, it is already in graph {arg.graph}'
+                item_graph = arg.graph
+                assert item_graph is None or super(NotificationGraph, item_graph).__getattribute__('_destroyed'), \
+                    f'can\'t create with item {repr(arg)}, it is already in graph {item_graph}'
                 graph.__add_item(arg, True)
 
             elif isinstance(arg, NotificationGraph):
                 for item in arg.__items:
                     graph.__add_item(item)
-
-                # merge behavior dicts
-                for behavior, id_set in arg.__behaviors.items():
-                    merged_id_set = graph.__behaviors.get(behavior, None)
-                    if merged_id_set is None:
-                        graph.__behaviors[behavior] = id_set
-                    else:
-                        merged_id_set |= id_set
-
+                merge_dict_set_values(graph.__behaviors, arg.__behaviors)
+                merge_dict_set_values(graph.__interest_attributes, arg.__interest_attributes)
                 arg.__destroy()
 
             else:
@@ -312,11 +327,14 @@ class NotificationGraph(object):
 
         if register_behaviors:
             for identifier, behavior in item._notification_behaviors.items():
-                id_set = self.__behaviors.get(behavior, None)
-                if id_set is None:
-                    id_set = set()
-                    self.__behaviors[behavior] = id_set
+                # register behaviors
+                id_set = self.__behaviors.setdefault(behavior, set())
                 id_set.add(identifier)
+
+                # register interests
+                for attribute in behavior.get_interested_attributes():
+                    behavior_set = self.__interest_attributes.setdefault((identifier, attribute), set())
+                    behavior_set.add(behavior)
 
     @staticmethod
     def on_connect(subscriber: NotificationItem, notifier: NotificationItem):
