@@ -265,14 +265,14 @@ class NotificationGraph(object):
         self.__items: Set[NotificationItem] = set()
         self.__behaviors: Dict[INotificationBehaviorInterface, set] = {}
         '''Behaviors with their related identifiers in this graph.
-        
+
         key: behavior,
         value: set of related identifiers'''
 
         self.__interest_attributes: Dict[Tuple[Any, str], Set[INotificationBehaviorInterface]] = {}
         '''When a behavior 'show interest' to an attribute, we register it here, and before every
         set attribute operation, we invoke set_attribute() on that behavior.
-        
+
         key: (identifier, attribute name),
         value: set of behaviors'''
 

@@ -112,6 +112,22 @@ class TestCountAttribute(unittest.TestCase):
         self.set_red_point(red_items[0], False)
         self.assertEqual(1, self.get_count(red_counter))
 
+    def test1_count_diamond(self):
+        red_item = create_items(1, self.red_point)[0]
+        red_counter = create_items(1, self.red_counter)[0]
+        mid_items = create_items(2)
+
+        red_counter.subscribe(mid_items[0])
+        red_counter.subscribe(mid_items[1])
+        mid_items[0].subscribe(red_item)
+        mid_items[1].subscribe(red_item)
+
+        self.assertEqual(0, self.get_count(red_counter))
+        self.set_red_point(red_item, True)
+        self.assertEqual(1, self.get_count(red_counter))
+        self.set_red_point(red_item, False)
+        self.assertEqual(0, self.get_count(red_counter))
+
     def get_count(self, counter: NotificationItem):
         return counter[self.red_counter].get_attribute(self.num_attr)
 
