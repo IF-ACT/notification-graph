@@ -1,6 +1,5 @@
 import unittest
-from notification_graph.core import NotificationItem, NotificationType
-from notification_graph.notification_behaviors import NotifySubscribers
+from notification_graph.core import NotificationItem
 
 
 class BasicTests(unittest.TestCase):
@@ -30,3 +29,30 @@ class BasicTests(unittest.TestCase):
 
         self.assertIs(item0.graph, item1.graph)
         self.assertIs(item0.graph, item2.graph)
+
+    def test3_tree(self):
+        items = self.create_items(7)
+
+        items[0].subscribe(items[1])
+        items[0].subscribe(items[2])
+
+        items[3].subscribe(items[4])
+        items[4].subscribe(items[5])
+        items[4].subscribe(items[6])
+
+        self.assertTrue(items[0].graph.is_tree)
+        self.assertTrue(items[0].is_head_of_tree)
+        self.assertFalse(items[1].is_head_of_tree)
+        self.assertTrue(items[3].graph.is_tree)
+
+        items[1].subscribe(items[3])
+
+        self.assertTrue(items[0].is_head_of_tree)
+
+        items[2].subscribe(items[5])
+
+        self.assertFalse(items[0].graph.is_tree)
+
+    @staticmethod
+    def create_items(count):
+        return [NotificationItem() for _ in range(count)]

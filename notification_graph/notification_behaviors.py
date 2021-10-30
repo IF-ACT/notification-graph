@@ -41,8 +41,8 @@ class INotificationBehaviorInterface:
         :raise NameError: this behavior does not handle given attribute
         """
 
-    def post_subscribe(self, subscriber_item, notifier_item, related_identifiers: set):
-        """Called after a new subscription established in the graph.
+    def pre_subscribe(self, subscriber_item, notifier_item, related_identifiers: set):
+        """Called before a new subscription established.
 
         :param subscriber_item:
         :type subscriber_item: NotificationItem
@@ -104,7 +104,7 @@ class NotifySubscribers(INotificationBehaviorInterface):
         else:
             raise NameError()
 
-    def post_subscribe(self, subscriber_item, notifier_item, related_identifiers: set):
+    def pre_subscribe(self, subscriber_item, notifier_item, related_identifiers: set):
         for identifier in related_identifiers:
             attribute_set = notifier_item.get_attribute_set(identifier)
             if attribute_set is None:
@@ -184,7 +184,7 @@ class CountAttribute(INotificationBehaviorInterface):
     def get_attribute(self, handle, attribute_name: str):
         if attribute_name not in self.__storages:
             raise NameError()
-        return handle.attribute_set.get_attribute(attribute_name, 0) + handle.attribute_set.get_cache(attribute_name, 0)
+        return self.__calculate_total(handle.attribute_set, attribute_name)
 
     def set_attribute(self, handle, attribute_name: str, attribute_value):
         if attribute_name in self.__storages:   # directly set count
@@ -199,12 +199,15 @@ class CountAttribute(INotificationBehaviorInterface):
         elif count_info := self.__attributes.get(attribute_name, None):     # on interested attribute set
             count_name, count_function = count_info
             attribute_set = handle.item.get_attribute_set(handle.identifier)
-            if attribute_set is None:
-                old_value = None
+            if attribute_set is None or not attribute_set.has_attribute(attribute_name):
+                self.__recursive_modify_count(
+                    handle.item, handle.identifier, count_name, count_function(attribute_value))
             else:
-                old_value = attribute_set.get_attribute(attribute_name, None)
-            self.__recursive_modify_count(
-                handle.item, handle.identifier, count_name, count_function(attribute_value) - count_function(old_value))
+                old_value = attribute_set.get_attribute(attribute_name)
+                self.__recursive_modify_count(
+                    handle.item, handle.identifier, count_name,
+                    count_function(attribute_value) - count_function(old_value)
+                )
 
         else:
             raise NameError()
@@ -216,6 +219,10 @@ class CountAttribute(INotificationBehaviorInterface):
             return value
         else:
             return 1 if value else 0
+
+    @staticmethod
+    def __calculate_total(attribute_set, attribute_name: str):
+        return attribute_set.get_attribute(attribute_name, 0) + attribute_set.get_cache(attribute_name, 0)
 
     @staticmethod
     def __recursive_modify_count(item, identifier, count_name: str, delta: int, visited=None):
