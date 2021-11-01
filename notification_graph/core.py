@@ -458,6 +458,66 @@ class NotificationGraph(object):
         return (subscriber.is_single or subscriber.graph.is_tree) and \
                notifier.is_head_of_tree
 
+    def debug_mermaid_graph(self, notification_type, *attributes: str, left_to_right=False):
+        """Draw the tree with mermaid.
+
+        Open the output of this function in a markdown viewer, e.g. typora, and you can see the graph image.
+        """
+        tab = '  '
+        result = [
+            f'{"Tree" if self.is_tree else "Graph"} for {repr(notification_type)} with {len(self)} items:\n\n'
+            f'```mermaid\n'
+            f'flowchart {"LR" if left_to_right else "TD"}\n']
+
+        # mermaid syntax
+        m_newline = '<br/>'
+        m_star_f = '#starf;'
+        m_star = '#star;'
+
+        def sort_method(i):
+            return id(i)
+
+        sorted_items = list(self.__items)
+        sorted_items.sort(key=sort_method)
+
+        item_index = {}
+
+        for index, item in enumerate(sorted_items):
+            item_index[item] = index
+            title = f'item {index}'
+            attribute_set = item.get_attribute_set(notification_type)
+            if attribute_set is None:
+                content = '(empty)'
+            else:
+                content_lines = []
+                for attribute in attributes:
+                    attr_part = f'{m_star_f}{repr(attribute_set.get_attribute(attribute))}' \
+                        if attribute_set.has_attribute(attribute) else ''
+                    cache_part = f'{m_star}{repr(attribute_set.get_cache(attribute))}' \
+                        if attribute_set.has_cache(attribute) else ''
+                    combined = attr_part + (' ' if attr_part and cache_part else '') + cache_part
+                    content_lines.append(f'{attribute}: {combined}')
+                content = m_newline.join(content_lines)
+            result.append(f'{tab}item_{index}(["{title}{m_newline}{content}"])\n')
+
+        result.append('\n')
+
+        current = {self.head} if self.head else {item for item in sorted_items if not item.subscriber_items}
+        visited = set()
+        while current:
+            sorted_current = list(current)
+            sorted_current.sort(key=sort_method)
+            current.clear()
+            for item in sorted_current:
+                for notifier in item.notifier_items:
+                    result.append(f'{tab}item_{item_index[item]} --> item_{item_index[notifier]}\n')
+                    if notifier not in visited:
+                        current.add(notifier)
+            visited.union(sorted_current)
+
+        result.append('```')
+        return ''.join(result)
+
     def __getattribute__(self, item):
         if super(NotificationGraph, self).__getattribute__('_destroyed'):
             raise ValueError('this graph is already destroyed')

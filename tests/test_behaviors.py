@@ -83,7 +83,8 @@ class TestNotifySubscribers(unittest.TestCase):
 
     def assertRedPoint(self, item: NotificationItem, activate: bool):
         self.assertEqual(item[self.red_point].get_attribute(self.attr_activate), activate,
-                         f'should be {"activate" if activate else "inactivate"}')
+                         f'should be {"activate" if activate else "inactivate"},'
+                         f' info:\n\n{item.graph.debug_mermaid_graph(self.red_point, self.attr_activate)}')
 
     def setRedPoint(self, item: NotificationItem, activate: bool):
         item[self.red_point].set_attribute(self.attr_activate, activate)
