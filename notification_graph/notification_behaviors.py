@@ -192,9 +192,10 @@ class CountAttribute(INotificationBehaviorInterface):
             attribute_set = handle.item.get_attribute_set(handle.identifier, True)
             old_value = attribute_set.get_attribute(attribute_name, 0)
             attribute_set.set_attribute(attribute_name, attribute_value)
+            visited = None if handle.item.graph.is_tree else set()
             for subscriber in handle.item.subscriber_items:
                 self.__recursive_modify_count(
-                    subscriber, handle.identifier, attribute_name, attribute_value - old_value)
+                    subscriber, handle.identifier, attribute_name, attribute_value - old_value, visited)
 
         elif count_info := self.__attributes.get(attribute_name, None):     # on interested attribute set
             count_name, count_function = count_info
@@ -227,11 +228,15 @@ class CountAttribute(INotificationBehaviorInterface):
     @staticmethod
     def __recursive_modify_count(item, identifier, count_name: str, delta: int, visited=None):
         """:type item: NotificationItem"""
-        if visited is None:
-            visited = set()
-        if delta == 0 or item in visited:
+        if delta == 0:
             return
-        visited.add(item)
+
+        if not item.graph.is_tree:
+            if visited is None:
+                visited = set()
+            if item in visited:
+                return
+            visited.add(item)
 
         attribute_set = item.get_attribute_set(identifier, True)
         old_value = attribute_set.get_cache(count_name, 0)
