@@ -352,7 +352,8 @@ class NotificationGraph(object):
             merge_dict_set_values(behaviors, notifier.graph.__behaviors)
 
         for behavior, identifiers in behaviors.items():
-            behavior.pre_subscribe(subscriber, notifier, identifiers)
+            for identifier in identifiers:
+                behavior.pre_subscribe(subscriber, notifier, identifier)
 
         return condition, behaviors
 
@@ -433,7 +434,8 @@ class NotificationGraph(object):
 
     def notify_pre_unsubscribe(self, subscriber: NotificationItem, notifier: NotificationItem):
         for behavior, related_identifiers in self.__behaviors.items():
-            behavior.pre_unsubscribe(subscriber, notifier, related_identifiers)
+            for identifier in related_identifiers:
+                behavior.pre_unsubscribe(subscriber, notifier, identifier)
 
     def __collect_interest(self, item: NotificationItem):
         for identifier, behavior in item._notification_behaviors.items():

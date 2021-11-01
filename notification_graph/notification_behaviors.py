@@ -41,26 +41,24 @@ class INotificationBehaviorInterface:
         :raise NameError: this behavior does not handle given attribute
         """
 
-    def pre_subscribe(self, subscriber_item, notifier_item, related_identifiers: set):
+    def pre_subscribe(self, subscriber_item, notifier_item, identifier):
         """Called before a new subscription established.
 
         :param subscriber_item:
         :type subscriber_item: NotificationItem
         :param notifier_item:
         :type notifier_item: NotificationItem
-        :param related_identifiers: if any notification type declared with an identifier and a behavior is in current
-            graph, then we say the identifier is related to the behavior in this graph
+        :param identifier:
         """
 
-    def pre_unsubscribe(self, subscriber_item, notifier_item, related_identifiers: set):
+    def pre_unsubscribe(self, subscriber_item, notifier_item, identifier):
         """Called before subscriber item unsubscribes an item.
 
         :param subscriber_item:
         :type subscriber_item: NotificationItem
         :param notifier_item:
         :type notifier_item: NotificationItem
-        :param related_identifiers: if any notification type declared with an identifier and a behavior is in current
-            graph, then we say the identifier is related to the behavior in this graph
+        :param identifier:
         """
 
     def __repr__(self):
@@ -104,15 +102,14 @@ class NotifySubscribers(INotificationBehaviorInterface):
         else:
             raise NameError()
 
-    def pre_subscribe(self, subscriber_item, notifier_item, related_identifiers: set):
-        for identifier in related_identifiers:
-            attribute_set = notifier_item.get_attribute_set(identifier)
-            if attribute_set is None:
-                continue
-            if self.__get_gathered_value(attribute_set):
-                self.__recursive_set_true(subscriber_item, identifier)
+    def pre_subscribe(self, subscriber_item, notifier_item, identifier):
+        attribute_set = notifier_item.get_attribute_set(identifier)
+        if attribute_set is None:
+            return
+        if self.__get_gathered_value(attribute_set):
+            self.__recursive_set_true(subscriber_item, identifier)
 
-    def pre_unsubscribe(self, subscriber_item, notifier_item, related_identifiers: set):
+    def pre_unsubscribe(self, subscriber_item, notifier_item, identifier):
         pass
 
     def __get_gathered_value(self, attribute_set):
