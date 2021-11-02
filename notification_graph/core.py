@@ -279,12 +279,6 @@ class NotificationItem(object):
             raise KeyError(f'{repr(identifier)} is not accessible')
         return NotificationAttributeSetHandle(self.__notification_attributes[identifier], behavior, self, identifier)
 
-    def __str__(self):
-        return self.__name
-
-    def __repr__(self):
-        return f'<Item {repr(self.__name)}>'
-
 
 # noinspection PyProtectedMember
 class NotificationGraph(object):
