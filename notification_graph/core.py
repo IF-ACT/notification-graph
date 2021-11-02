@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, Any, Dict, Generator, Set, Optional, Tuple, Iterable
+from typing import Callable, Any, Dict, Generator, Set, Optional, Tuple, Iterable, List
 from .notification_behaviors import INotificationBehaviorInterface
 from .util import merge_dict_set_values, EGraphCondition
 
@@ -24,7 +24,7 @@ class NotificationType(object):
         return self.__default_attributes
 
     def __repr__(self):
-        return f'<notification type {repr(self.__identifier)} with behavior {self.__behavior}>'
+        return f'<Type {repr(self.__identifier)} with behavior {self.__behavior}>'
 
 
 class NotificationAttributeSet(object):
@@ -105,12 +105,13 @@ class NotificationAttributeSetHandle(object):
 
 class NotificationItem(object):
 
-    def __init__(self):
+    def __init__(self, name: str = None):
         self.__graph: Optional[NotificationGraph] = None
         self.__notification_behaviors: Dict[Any, INotificationBehaviorInterface] = {}
         self.__notification_attributes: Dict[Any, NotificationAttributeSet] = {}
         self.__notifier_set: Set[NotificationItem] = set()
         self.__subscriber_set: Set[NotificationItem] = set()
+        self.__name = name
 
     @property
     def graph(self):
@@ -132,6 +133,10 @@ class NotificationItem(object):
         :return: items subscribing self
         """
         return self.__subscriber_set
+
+    @property
+    def name(self):
+        return self.__name
 
     @property
     def is_single(self):
@@ -273,6 +278,12 @@ class NotificationItem(object):
         if behavior is None:
             raise KeyError(f'{repr(identifier)} is not accessible')
         return NotificationAttributeSetHandle(self.__notification_attributes[identifier], behavior, self, identifier)
+
+    def __str__(self):
+        return self.__name
+
+    def __repr__(self):
+        return f'<Item {repr(self.__name)}>'
 
 
 # noinspection PyProtectedMember
@@ -474,17 +485,29 @@ class NotificationGraph(object):
         m_star_f = '#starf;'
         m_star = '#star;'
 
-        def sort_method(i):
-            return id(i)
+        def sort_method(i: NotificationItem):
+            class NameThenId(object):
+                def __init__(self, _name, _id):
+                    self._name = _name
+                    self._id = _id
 
-        sorted_items = list(self.__items)
-        sorted_items.sort(key=sort_method)
+                def __lt__(self, other: NameThenId):
+                    if self._name is None and other._name is None:
+                        return self._id < other._id
+                    if self._name is None:
+                        return True
+                    if other._name is None:
+                        return False
+                    return self._name < other._name
+            return NameThenId(i.name, id(i))
+
+        sorted_items: List[NotificationItem] = sorted(self.__items, key=sort_method)
 
         item_index = {}
 
         for index, item in enumerate(sorted_items):
             item_index[item] = index
-            title = f'item {index}'
+            title = f'unnamed item {index}' if item.name is None else item.name
             attribute_set = item.get_attribute_set(notification_type)
             if attribute_set is None:
                 content = '(empty)'
@@ -505,8 +528,7 @@ class NotificationGraph(object):
         current = {self.head} if self.head else {item for item in sorted_items if not item.subscriber_items}
         visited = set()
         while current:
-            sorted_current = list(current)
-            sorted_current.sort(key=sort_method)
+            sorted_current = sorted(current, key=sort_method)
             current.clear()
             for item in sorted_current:
                 for notifier in item.notifier_items:

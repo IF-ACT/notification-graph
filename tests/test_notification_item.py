@@ -55,4 +55,4 @@ class BasicTests(unittest.TestCase):
 
     @staticmethod
     def create_items(count):
-        return [NotificationItem() for _ in range(count)]
+        return [NotificationItem(f'Item{i}') for i in range(count)]

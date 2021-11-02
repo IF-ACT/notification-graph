@@ -4,8 +4,8 @@ from notification_graph.core import NotificationType, NotificationItem
 from notification_graph.notification_behaviors import NotifySubscribers, CountAttribute
 
 
-def create_items(num: int, add_attribute: NotificationType = None):
-    items = [NotificationItem() for _ in range(num)]
+def create_items(num: int, add_attribute: NotificationType = None, name: str = 'Item'):
+    items = [NotificationItem(f'{name}{i}') for i in range(num)]
     if add_attribute is not None:
         for item in items:
             item.add_notification(add_attribute)
@@ -55,7 +55,7 @@ class TestNotifySubscribers(unittest.TestCase):
 
     def test2_subscribe_multi_indirectly(self):
         items = create_items(3, self.red_point)
-        mid_items = create_items(2)
+        mid_items = create_items(2, name='MidItem')
 
         items[0].subscribe(mid_items[0])
         items[0].subscribe(mid_items[1])
